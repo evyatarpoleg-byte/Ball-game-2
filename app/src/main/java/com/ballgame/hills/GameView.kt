@@ -73,7 +73,7 @@ class GameView(context: Context) : View(context) {
 
         val w = width.toFloat()
         val h = height.toFloat()
-        val scale = h / viewMeters
+        val scale = (h / viewMeters).toFloat()
         val halfW = w / scale / 2.0
         val tx = world.x + halfW * 0.35
         val ty = world.y + 3.0
