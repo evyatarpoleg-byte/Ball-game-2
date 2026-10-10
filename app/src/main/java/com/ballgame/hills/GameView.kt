@@ -21,6 +21,7 @@ class GameView(context: Context) : View(context) {
     private val prefs = context.getSharedPreferences("hills", Context.MODE_PRIVATE)
     private var best = prefs.getInt("best", 0)            // longest distance, m
     private var bestHeight = prefs.getInt("bestHeight", 0) // highest jump above the ground, m
+    private var totalCoins = prefs.getInt("coins", 0)
     private var startBest = best
     private var startBestHeight = bestHeight
     private var shownDistRecord = false
@@ -57,11 +58,13 @@ class GameView(context: Context) : View(context) {
     fun pauseLoop() { running = false; saveRecords() }
 
     private fun saveRecords() {
-        prefs.edit().putInt("best", best).putInt("bestHeight", bestHeight).apply()
+        prefs.edit().putInt("best", best).putInt("bestHeight", bestHeight)
+            .putInt("coins", totalCoins + world.coinsCollected).apply()
     }
 
     private fun newRun() {
         saveRecords()
+        totalCoins += world.coinsCollected
         world = World(); camInit = false
         startBest = best; startBestHeight = bestHeight
         shownDistRecord = false; shownHeightRecord = false
@@ -198,6 +201,16 @@ class GameView(context: Context) : View(context) {
 
         // milestone flags every 1000 m
         val halfView = w / 2 / scale
+        // coins
+        for (coin in world.coinsIn(camX - halfView - 2, camX + halfView + 2)) {
+            if (coin.taken) continue
+            val star = coin.value > 1
+            val cr = (if (star) 1.3 else 0.8) * scale
+            ballPaint.color = if (star) Color.rgb(255, 140, 30) else Color.rgb(255, 205, 40)
+            c.drawCircle(sx(coin.x), sy(coin.y), cr.toFloat(), ballPaint)
+            ballPaint.color = if (star) Color.rgb(255, 230, 120) else Color.rgb(255, 238, 150)
+            c.drawCircle(sx(coin.x), sy(coin.y), (cr * 0.6).toFloat(), ballPaint)
+        }
         var kFlag = max(1, ceil((camX - halfView - 3.0) / 1000.0).toInt())
         while (3.0 + kFlag * 1000.0 <= camX + halfView) {
             val fx = 3.0 + kFlag * 1000.0
@@ -246,6 +259,7 @@ class GameView(context: Context) : View(context) {
         c.drawText("${world.distance.toInt()} m", 24f, h / 12f, text)
         text.textSize = h / 24f
         c.drawText("best $best m   highest $bestHeight m", 24f, h / 12f + h / 18f, text)
+        c.drawText("coins ${world.coinsCollected}   total ${totalCoins + world.coinsCollected}", 24f, h / 12f + h / 9f, text)
         text.textAlign = Paint.Align.CENTER
         val nowMs = System.currentTimeMillis()
         toasts.removeAll { it.until < nowMs }

@@ -4,6 +4,7 @@ import java.util.Random
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -70,8 +71,53 @@ class Terrain(seed: Long) {
     }
 }
 
-class World(seed: Long = System.nanoTime()) {
+class Coin(val x: Double, val y: Double, val value: Int) {
+    var taken = false
+}
+
+/** Things the UI should react to (sounds, haptics, toasts). */
+object Ev {
+    const val COIN = 1
+}
+
+class World(private val seed: Long = System.nanoTime()) {
     val terrain = Terrain(seed)
+    val events = ArrayList<Int>()
+    var coinsCollected = 0
+    private val chunks = HashMap<Int, ArrayList<Coin>>()
+    private val chunkSize = 50.0
+
+    /** Coins above hills: arcs reward airtime, rare stars reward really high jumps. */
+    private fun chunk(ci: Int): ArrayList<Coin> = chunks.getOrPut(ci) {
+        val list = ArrayList<Coin>()
+        if (ci >= 3) {
+            val r = Random(seed xor (ci * 7919L))
+            val x0 = ci * chunkSize
+            if (r.nextDouble() < 0.55) {
+                val cx = x0 + 8 + r.nextDouble() * 30
+                val lift = 5 + r.nextDouble() * 17
+                var base = 0.0
+                for (i in 0 until 5) base = max(base, terrain.height(cx + i * 3.5))
+                for (i in 0 until 5) {
+                    val bump = 2.5 * kotlin.math.sin(PI * i / 4.0)
+                    list += Coin(cx + i * 3.5, base + lift + bump, 1)
+                }
+            }
+            if (r.nextDouble() < 0.18) {
+                val sx = x0 + 5 + r.nextDouble() * 40
+                list += Coin(sx, terrain.height(sx) + 35 + r.nextDouble() * 25, 5)
+            }
+        }
+        chunks.remove((ci - 6))
+        list
+    }
+
+    fun coinsIn(xa: Double, xb: Double): List<Coin> {
+        val out = ArrayList<Coin>()
+        for (ci in floor(xa / chunkSize).toInt()..floor(xb / chunkSize).toInt()) out += chunk(ci)
+        return out
+    }
+
     var x = 3.0
     var y = terrain.height(3.0) + Phys.RADIUS
     var vx = 0.0
@@ -138,6 +184,14 @@ class World(seed: Long = System.nanoTime()) {
             angle += (vx * ny - vy * nx) / Phys.RADIUS * dt
         } else {
             angle += (vx / Phys.RADIUS) * 0.2 * dt
+        }
+
+        for (coin in coinsIn(x - 3.0, x + 3.0)) {
+            if (!coin.taken && hypot(coin.x - x, coin.y - y) < Phys.RADIUS + 0.9) {
+                coin.taken = true
+                coinsCollected += coin.value
+                events += Ev.COIN
+            }
         }
 
         stillTime = if (launched && speed < 0.4) stillTime + dt else 0.0
