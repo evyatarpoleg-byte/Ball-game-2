@@ -14,6 +14,7 @@ import kotlin.math.cos
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
 class GameView(context: Context) : View(context) {
@@ -130,6 +131,10 @@ class GameView(context: Context) : View(context) {
             saveRecords()
         }
         if (!world.over) updateRecords()
+        for (ev in world.events) {
+            if (ev == Ev.PERFECT) toast("PERFECT landing!  x${min(1 + world.combo, 5)} coins")
+        }
+        world.events.clear()
 
         val w = width.toFloat()
         val h = height.toFloat()
@@ -267,7 +272,7 @@ class GameView(context: Context) : View(context) {
         // HUD
         text.textAlign = Paint.Align.LEFT
         text.textSize = h / 16f
-        c.drawText("${world.distance.toInt()} m", 24f, h / 12f, text)
+        c.drawText("${world.distance.toInt()} m" + if (world.combo > 0) "   combo x${world.combo}" else "", 24f, h / 12f, text)
         text.textSize = h / 24f
         c.drawText("best $best m   highest $bestHeight m", 24f, h / 12f + h / 18f, text)
         c.drawText("coins ${world.coinsCollected}   total ${totalCoins + world.coinsCollected}", 24f, h / 12f + h / 9f, text)

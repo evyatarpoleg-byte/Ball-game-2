@@ -80,12 +80,17 @@ class Coin(val x: Double, val y: Double, val value: Int) {
 /** Things the UI should react to (sounds, haptics, toasts). */
 object Ev {
     const val COIN = 1
+    const val PERFECT = 2
+    const val HARD = 3
+    const val SOFT = 4
 }
 
 class World(private val seed: Long = System.nanoTime()) {
     val terrain = Terrain(seed)
     val events = ArrayList<Int>()
     var coinsCollected = 0
+    var combo = 0          // consecutive perfect landings
+    private var airTime = 0.0
     private val chunks = HashMap<Int, ArrayList<Coin>>()
     private val chunkSize = 50.0
 
@@ -149,6 +154,25 @@ class World(private val seed: Long = System.nanoTime()) {
         }
     }
 
+    /** Called on touchdown. [vn] is the speed into the ground (negative), [slope] the ground slope. */
+    private fun landed(vn: Double, slope: Double) {
+        val impact = -vn
+        val sp = speed
+        if (slope < -0.1 && impact < 0.3 * sp) {
+            // Shallow touchdown on a downhill: keep the speed and add a boost.
+            combo++
+            val boost = 1.0 + 0.04 * min(combo, 5)
+            vx *= boost
+            vy *= boost
+            events += Ev.PERFECT
+        } else if (impact > 12.0) {
+            combo = 0
+            events += Ev.HARD
+        } else {
+            events += Ev.SOFT
+        }
+    }
+
     private fun step(dt: Double) {
         time += dt
         if (!holding && time > 0.3) launched = true
@@ -173,6 +197,7 @@ class World(private val seed: Long = System.nanoTime()) {
         grounded = false
         if (d < Phys.RADIUS) {
             grounded = true
+            if (airTime > 0.35) landed(vx * nx + vy * ny, m)
             x += nx * (Phys.RADIUS - d)
             y += ny * (Phys.RADIUS - d)
             val vn = vx * nx + vy * ny
@@ -192,10 +217,12 @@ class World(private val seed: Long = System.nanoTime()) {
             angle += (vx / Phys.RADIUS) * 0.2 * dt
         }
 
+        airTime = if (grounded) 0.0 else airTime + dt
+
         for (coin in coinsIn(x - 3.0, x + 3.0)) {
             if (!coin.taken && hypot(coin.x - x, coin.y - y) < Phys.RADIUS + 0.9) {
                 coin.taken = true
-                coinsCollected += coin.value
+                coinsCollected += coin.value * min(1 + combo, 5)
                 events += Ev.COIN
             }
         }
