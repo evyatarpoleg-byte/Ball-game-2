@@ -3,7 +3,7 @@
 2D physics ball game for Android (Kotlin, no external libraries).
 
 - **Start:** hold the screen to push the ball off the first hill.
-- **After launch:** holding makes the ball heavier (gravity x2.6). Hold on downhills to gain speed, release on uphills.
+- **After launch:** holding makes the ball heavier (gravity x4). Hold on downhills to gain speed, release on uphills.
 - You're stuck when the ball stops for 2 s. Score = metres travelled.
 
 ## Build without a PC

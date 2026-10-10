@@ -12,10 +12,10 @@ import kotlin.math.sqrt
 /** Units are metres, y points up. */
 object Phys {
     const val G = 20.0
-    const val HEAVY = 2.6          // gravity multiplier while the finger is down (after launch)
+    const val HEAVY = 4.0          // gravity multiplier while the finger is down (after launch)
     const val RADIUS = 0.8
-    const val FRICTION = 0.5       // constant rolling deceleration, m/s^2
-    const val DRAG = 0.04          // air/linear drag, 1/s
+    const val FRICTION = 0.35      // constant rolling deceleration, m/s^2
+    const val DRAG = 0.03          // air/linear drag, 1/s
     const val START_PUSH = 12.0    // m/s^2 forward push during the opening hold
     const val STEP = 1.0 / 240.0
 }
