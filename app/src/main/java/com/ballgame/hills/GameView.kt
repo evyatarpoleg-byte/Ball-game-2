@@ -38,6 +38,7 @@ class GameView(context: Context) : View(context) {
 
     private val baseMeters = 36.0   // visible height in metres at ground level
     private var viewMeters = baseMeters
+    private var altSmooth = 0.0
     private var restartRect = RectF()
     private val sky = Paint()
     private val far = Paint().apply { color = Color.rgb(150, 170, 205); isAntiAlias = true }
@@ -67,6 +68,7 @@ class GameView(context: Context) : View(context) {
         lastMilestone = 0
         toasts.clear()
         viewMeters = baseMeters
+        altSmooth = 0.0
     }
 
     private fun toast(text: String, big: Boolean = false) {
@@ -131,12 +133,18 @@ class GameView(context: Context) : View(context) {
         // Zoom out so that both the ball and the ground below it stay on screen.
         val groundY = world.terrain.height(world.x)
         val altTotal = (world.y - groundY).coerceAtLeast(0.0)
-        val need = max(baseMeters, (altTotal + 14.0) * 1.2)
-        viewMeters = if (need > viewMeters) need else viewMeters + (need - viewMeters) * (1 - Math.exp(-2.0 * dt))
+        // Smoothed altitude (rises fast, falls slowly) so the zoom doesn't pump as the ground under the ball changes.
+        val altRate = if (altTotal > altSmooth) 5.0 else 0.7
+        altSmooth += (altTotal - altSmooth) * (1 - Math.exp(-altRate * dt))
+        val need = max(baseMeters, (altSmooth + 24.0) * 1.6)
+        val zoomRate = if (need > viewMeters) 4.0 else 0.8
+        viewMeters += (need - viewMeters) * (1 - Math.exp(-zoomRate * dt))
+        // Safety net only: never let the ground leave the screen.
+        viewMeters = max(viewMeters, (altTotal + 14.0) * 1.15)
         val scale = (h / viewMeters).toFloat()
         val halfW = w / scale / 2.0
         val tx = world.x + halfW * 0.35
-        val ty = world.y + 3.0 - max(0.0, altTotal - 10.0) * 0.5
+        val ty = world.y + 3.0 - max(0.0, altSmooth - 10.0) * 0.5
         if (!camInit) { camX = tx; camY = ty; camInit = true }
         val k = 1 - Math.exp(-4.0 * dt)
         camX += (tx - camX) * 1.0.coerceAtMost(k * 3)
