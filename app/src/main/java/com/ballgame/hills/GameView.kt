@@ -244,6 +244,17 @@ class GameView(context: Context) : View(context) {
         val a = world.angle
         c.drawLine(bx, by, bx + (cos(a) * r * 0.85).toFloat(), by + (sin(a) * r * 0.85).toFloat(), mark)
 
+        // weight meter
+        val mw = w * 0.3f
+        val mx = (w - mw) / 2
+        val my = h - h / 14f
+        val mh = h / 40f
+        ballPaint.color = Color.argb(120, 0, 0, 0)
+        c.drawRoundRect(mx - 3f, my - 3f, mx + mw + 3f, my + mh + 3f, mh, mh, ballPaint)
+        val wt = world.weight.toFloat()
+        ballPaint.color = Color.rgb((255 * (1 - wt)).toInt().coerceIn(60, 255), (200 * wt).toInt().coerceIn(40, 200), 50)
+        if (wt > 0f) c.drawRoundRect(mx, my, mx + mw * wt, my + mh, mh / 2, mh / 2, ballPaint)
+
         // restart button
         val bs = h / 9f
         restartRect.set(w - bs - 16f, 16f, w - 16f, 16f + bs)

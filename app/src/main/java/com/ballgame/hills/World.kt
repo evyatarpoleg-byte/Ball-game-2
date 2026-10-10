@@ -19,6 +19,8 @@ object Phys {
     const val DRAG = 0.03          // air/linear drag, 1/s
     const val START_PUSH = 12.0    // m/s^2 forward push during the opening hold
     const val STEP = 1.0 / 240.0
+    const val WEIGHT_SECONDS = 5.0 // how long a full meter lasts while heavy
+    const val WEIGHT_REGEN = 0.5   // meter refill per second while the finger is up
 }
 
 /** Endless hills: key points joined by cosine curves, so slope is 0 at every peak and valley. */
@@ -131,7 +133,9 @@ class World(private val seed: Long = System.nanoTime()) {
     private var stillTime = 0.0
     private var accum = 0.0
 
-    val heavy get() = holding && launched
+    /** Weight energy 0..1: drains while heavy, refills while the finger is up. */
+    var weight = 1.0
+    val heavy get() = holding && launched && weight > 0.0
     val distance get() = max(0.0, x - 3.0)
     val speed get() = hypot(vx, vy)
 
@@ -151,6 +155,8 @@ class World(private val seed: Long = System.nanoTime()) {
         if (holding && !launched && x > 8.0) launched = true
 
         val g = if (heavy) Phys.G * Phys.HEAVY else Phys.G
+        if (heavy) weight = max(0.0, weight - dt / Phys.WEIGHT_SECONDS)
+        else if (!holding) weight = min(1.0, weight + dt * Phys.WEIGHT_REGEN)
         if (holding && !launched) vx += Phys.START_PUSH * dt
         vy -= g * dt
         val k = exp(-Phys.DRAG * dt)
