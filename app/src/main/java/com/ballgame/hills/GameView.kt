@@ -26,6 +26,18 @@ private val PALETTES = arrayOf(
     intArrayOf(rgb(10, 15, 50), rgb(50, 60, 110), rgb(40, 50, 95), rgb(30, 40, 80), rgb(40, 80, 70), rgb(45, 40, 55), rgb(90, 150, 120)),
 )
 
+/** Ball skins, unlocked by your longest distance. Colour 0 = rainbow. */
+private class Skin(val name: String, val unlock: Int, val color: Int)
+
+private val SKINS = arrayOf(
+    Skin("Gold", 0, Color.rgb(250, 190, 40)),
+    Skin("Blue", 1000, Color.rgb(60, 130, 255)),
+    Skin("Green", 2500, Color.rgb(60, 200, 100)),
+    Skin("Purple", 5000, Color.rgb(160, 80, 230)),
+    Skin("Pink", 7500, Color.rgb(255, 110, 180)),
+    Skin("Rainbow", 10000, 0),
+)
+
 private fun rgb(r: Int, g: Int, b: Int) = Color.rgb(r, g, b)
 
 private fun mix(a: Int, b: Int, t: Float): Int = Color.rgb(
@@ -62,6 +74,9 @@ class GameView(context: Context) : View(context) {
     private var altSmooth = 0.0
     private var restartRect = RectF()
     private var soundRect = RectF()
+    private var skinRect = RectF()
+    private var skin = prefs.getInt("skin", 0).coerceIn(0, SKINS.size - 1)
+    private val announcedSkins = HashSet<Int>()
     private val sfx = Sfx().apply { enabled = prefs.getBoolean("sound", true) }
     private val sky = Paint()
     private val far = Paint().apply { color = Color.rgb(150, 170, 205); isAntiAlias = true }
@@ -89,7 +104,31 @@ class GameView(context: Context) : View(context) {
             .putInt("coins", totalCoins + world.coinsCollected).apply()
     }
 
+    private fun cycleSkin() {
+        for (step in 1..SKINS.size) {
+            val i = (skin + step) % SKINS.size
+            if (best >= SKINS[i].unlock) {
+                if (i == skin) {
+                    val next = SKINS.firstOrNull { it.unlock > best }
+                    toast(if (next != null) "Next skin (${next.name}) at ${next.unlock} m" else "All skins unlocked")
+                    return
+                }
+                skin = i
+                prefs.edit().putInt("skin", skin).apply()
+                toast("Skin: ${SKINS[i].name}")
+                return
+            }
+        }
+    }
+
+    private fun skinColor(): Int {
+        val sk = SKINS[skin]
+        if (sk.color != 0) return sk.color
+        return Color.HSVToColor(floatArrayOf(((System.currentTimeMillis() / 8) % 360).toFloat(), 0.8f, 1f))
+    }
+
     private fun newRun() {
+        announcedSkins.clear()
         saveRecords()
         totalCoins += world.coinsCollected
         world = World(); camInit = false
@@ -121,6 +160,11 @@ class GameView(context: Context) : View(context) {
                 if (startBestHeight > 0 && !shownHeightRecord) { shownHeightRecord = true; toast("New height record!", fanfare = true) }
             }
         }
+        for ((i, sk) in SKINS.withIndex()) {
+            if (sk.unlock > 0 && d >= sk.unlock && startBest < sk.unlock && announcedSkins.add(i)) {
+                toast("New skin unlocked: ${sk.name}!", fanfare = true)
+            }
+        }
         while (d >= (lastMilestone + 1) * 1000) {
             lastMilestone++
             if (lastMilestone % 10 == 0) toast("CONGRATULATIONS! ${lastMilestone} km!", big = true, fanfare = true)
@@ -138,6 +182,10 @@ class GameView(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 if (restartRect.contains(e.x, e.y)) {
                     newRun()
+                    return true
+                }
+                if (skinRect.contains(e.x, e.y)) {
+                    cycleSkin()
                     return true
                 }
                 if (soundRect.contains(e.x, e.y)) {
@@ -324,7 +372,7 @@ class GameView(context: Context) : View(context) {
             ballPaint.color = Color.argb(70, 255, 60, 40)
             c.drawCircle(bx, by, r * 1.6f, ballPaint)
         }
-        ballPaint.color = if (heavy) Color.rgb(200, 40, 30) else Color.rgb(250, 190, 40)
+        ballPaint.color = if (heavy) mix(skinColor(), Color.rgb(200, 40, 30), 0.65f) else skinColor()
         c.drawCircle(bx, by, r * if (heavy) 1.15f else 1f, ballPaint)
         val a = world.angle
         c.drawLine(bx, by, bx + (cos(a) * r * 0.85).toFloat(), by + (sin(a) * r * 0.85).toFloat(), mark)
@@ -348,6 +396,11 @@ class GameView(context: Context) : View(context) {
         text.textAlign = Paint.Align.CENTER
         text.textSize = bs * 0.7f
         c.drawText("\u21BB", restartRect.centerX(), restartRect.centerY() + bs * 0.25f, text)
+        skinRect.set(restartRect.left - 2 * bs - 24f, 16f, restartRect.left - bs - 24f, 16f + bs)
+        ballPaint.color = Color.argb(150, 0, 0, 0)
+        c.drawRoundRect(skinRect, bs / 4, bs / 4, ballPaint)
+        ballPaint.color = skinColor()
+        c.drawCircle(skinRect.centerX(), skinRect.centerY(), bs * 0.3f, ballPaint)
         soundRect.set(restartRect.left - bs - 12f, 16f, restartRect.left - 12f, 16f + bs)
         ballPaint.color = Color.argb(150, 0, 0, 0)
         c.drawRoundRect(soundRect, bs / 4, bs / 4, ballPaint)
