@@ -11,13 +11,24 @@ import android.graphics.Shader
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.cos
+import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.sin
 
 class GameView(context: Context) : View(context) {
     private var world = World()
     private val prefs = context.getSharedPreferences("hills", Context.MODE_PRIVATE)
-    private var best = prefs.getInt("best", 0)
+    private var best = prefs.getInt("best", 0)            // longest distance, m
+    private var bestHeight = prefs.getInt("bestHeight", 0) // highest jump above the ground, m
+    private var startBest = best
+    private var startBestHeight = bestHeight
+    private var shownDistRecord = false
+    private var shownHeightRecord = false
+    private var lastMilestone = 0
+    private val toasts = ArrayList<Toast>()
+    private class Toast(val text: String, val big: Boolean, val until: Long)
+    private val cheers = arrayOf("Keep going!", "Nice rolling!", "You're on fire!", "Unstoppable!", "Smooth ride!")
     private var running = false
     private var lastNanos = 0L
     private var camX = 0.0
@@ -42,7 +53,46 @@ class GameView(context: Context) : View(context) {
     private val path = Path()
 
     fun resumeLoop() { running = true; lastNanos = 0L; postInvalidateOnAnimation() }
-    fun pauseLoop() { running = false }
+    fun pauseLoop() { running = false; saveRecords() }
+
+    private fun saveRecords() {
+        prefs.edit().putInt("best", best).putInt("bestHeight", bestHeight).apply()
+    }
+
+    private fun newRun() {
+        saveRecords()
+        world = World(); camInit = false
+        startBest = best; startBestHeight = bestHeight
+        shownDistRecord = false; shownHeightRecord = false
+        lastMilestone = 0
+        toasts.clear()
+        viewMeters = baseMeters
+    }
+
+    private fun toast(text: String, big: Boolean = false) {
+        toasts.add(Toast(text, big, System.currentTimeMillis() + if (big) 5000 else 3000))
+        if (toasts.size > 3) toasts.removeAt(0)
+    }
+
+    private fun updateRecords() {
+        val d = world.distance.toInt()
+        if (d > best) {
+            best = d
+            if (startBest > 0 && !shownDistRecord) { shownDistRecord = true; toast("New distance record!") }
+        }
+        if (!world.grounded) {
+            val hgt = (world.y - Phys.RADIUS - world.terrain.height(world.x)).toInt()
+            if (hgt > bestHeight) {
+                bestHeight = hgt
+                if (startBestHeight > 0 && !shownHeightRecord) { shownHeightRecord = true; toast("New height record!") }
+            }
+        }
+        while (d >= (lastMilestone + 1) * 1000) {
+            lastMilestone++
+            if (lastMilestone % 10 == 0) toast("CONGRATULATIONS! ${lastMilestone} km!", big = true)
+            else toast("${lastMilestone * 1000} m - ${cheers[lastMilestone % cheers.size]}")
+        }
+    }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         sky.shader = LinearGradient(0f, 0f, 0f, h.toFloat(), Color.rgb(90, 170, 240), Color.rgb(220, 240, 255), Shader.TileMode.CLAMP)
@@ -53,12 +103,10 @@ class GameView(context: Context) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (restartRect.contains(e.x, e.y)) {
-                    world = World(); camInit = false
+                    newRun()
                     return true
                 }
-                if (world.over && System.currentTimeMillis() - overAt > 600) {
-                    world = World(); camInit = false
-                }
+                if (world.over && System.currentTimeMillis() - overAt > 600) newRun()
                 world.holding = true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> world.holding = false
@@ -74,23 +122,26 @@ class GameView(context: Context) : View(context) {
         world.update(dt)
         if (world.over && !wasOver) {
             overAt = System.currentTimeMillis()
-            val d = world.distance.toInt()
-            if (d > best) { best = d; prefs.edit().putInt("best", best).apply() }
+            saveRecords()
         }
+        if (!world.over) updateRecords()
 
         val w = width.toFloat()
         val h = height.toFloat()
-        val alt = (world.y - world.terrain.height(world.x) - 4.0).coerceAtLeast(0.0)
-        val wantMeters = (baseMeters + alt * 1.6).coerceAtMost(baseMeters * 2.5)
-        viewMeters += (wantMeters - viewMeters) * (1 - Math.exp(-3.0 * dt))
+        // Zoom out so that both the ball and the ground below it stay on screen.
+        val groundY = world.terrain.height(world.x)
+        val altTotal = (world.y - groundY).coerceAtLeast(0.0)
+        val need = max(baseMeters, (altTotal + 14.0) * 1.2)
+        viewMeters = if (need > viewMeters) need else viewMeters + (need - viewMeters) * (1 - Math.exp(-2.0 * dt))
         val scale = (h / viewMeters).toFloat()
         val halfW = w / scale / 2.0
         val tx = world.x + halfW * 0.35
-        val ty = world.y + 3.0
+        val ty = world.y + 3.0 - max(0.0, altTotal - 10.0) * 0.5
         if (!camInit) { camX = tx; camY = ty; camInit = true }
         val k = 1 - Math.exp(-4.0 * dt)
         camX += (tx - camX) * 1.0.coerceAtMost(k * 3)
         camY += (ty - camY) * k
+        camY = camY.coerceIn(world.y - viewMeters / 2 + 3, minOf(world.y + viewMeters / 2 - 3, groundY + viewMeters / 2 - 1))
 
         fun sx(wx: Double) = (w / 2 + (wx - camX) * scale).toFloat()
         fun sy(wy: Double) = (h / 2 - (wy - camY) * scale).toFloat()
@@ -137,6 +188,27 @@ class GameView(context: Context) : View(context) {
         }
         c.drawPath(path, edge)
 
+        // milestone flags every 1000 m
+        val halfView = w / 2 / scale
+        var kFlag = max(1, ceil((camX - halfView - 3.0) / 1000.0).toInt())
+        while (3.0 + kFlag * 1000.0 <= camX + halfView) {
+            val fx = 3.0 + kFlag * 1000.0
+            val big = kFlag % 10 == 0
+            val gy = world.terrain.height(fx)
+            val poleH = if (big) 10.0 else 6.0
+            mark.strokeWidth = scale * 0.25f
+            c.drawLine(sx(fx), sy(gy), sx(fx), sy(gy + poleH), mark)
+            ballPaint.color = if (big) Color.rgb(220, 40, 40) else Color.rgb(250, 200, 40)
+            path.reset()
+            path.moveTo(sx(fx), sy(gy + poleH))
+            path.lineTo(sx(fx + poleH * 0.6), sy(gy + poleH * 0.8))
+            path.lineTo(sx(fx), sy(gy + poleH * 0.6))
+            path.close()
+            c.drawPath(path, ballPaint)
+            kFlag++
+        }
+        mark.strokeWidth = 6f
+
         // ball
         val r = (Phys.RADIUS * scale).toFloat()
         val bx = sx(world.x)
@@ -165,18 +237,29 @@ class GameView(context: Context) : View(context) {
         text.textSize = h / 16f
         c.drawText("${world.distance.toInt()} m", 24f, h / 12f, text)
         text.textSize = h / 24f
-        c.drawText("best $best m", 24f, h / 12f + h / 18f, text)
+        c.drawText("best $best m   highest $bestHeight m", 24f, h / 12f + h / 18f, text)
         text.textAlign = Paint.Align.CENTER
+        val nowMs = System.currentTimeMillis()
+        toasts.removeAll { it.until < nowMs }
+        var ty0 = h * 0.3f
+        for (t in toasts) {
+            text.textSize = if (t.big) h / 9f else h / 14f
+            text.color = if (t.big) Color.rgb(255, 215, 60) else Color.WHITE
+            c.drawText(t.text, w / 2, ty0, text)
+            ty0 += text.textSize * 1.2f
+        }
+        text.color = Color.WHITE
+        text.textSize = h / 24f
         if (!world.launched && !world.holding) {
-            c.drawText("Hold to push the ball off the hill", w / 2, h * 0.3f, text)
+            c.drawText("Hold to push the ball off the hill", w / 2, h * 0.2f, text)
         } else if (world.launched && world.distance < 60) {
             c.drawText("Hold on downhills = heavier ball = more speed", w / 2, h * 0.2f, text)
         }
         if (world.over) {
             text.textSize = h / 10f
-            c.drawText("Stuck at ${world.distance.toInt()} m", w / 2, h * 0.4f, text)
+            c.drawText("Stuck at ${world.distance.toInt()} m", w / 2, h * 0.55f, text)
             text.textSize = h / 20f
-            c.drawText("Tap to try again", w / 2, h * 0.5f, text)
+            c.drawText("Tap to try again", w / 2, h * 0.65f, text)
         }
 
         if (running) postInvalidateOnAnimation()
