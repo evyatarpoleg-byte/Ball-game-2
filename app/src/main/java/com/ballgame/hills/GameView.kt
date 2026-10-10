@@ -17,6 +17,22 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
+/** Per biome: sky top, sky bottom, far ridge, near ridge, grass band, rock, grass edge. */
+private val PALETTES = arrayOf(
+    intArrayOf(rgb(90, 170, 240), rgb(220, 240, 255), rgb(150, 170, 205), rgb(110, 135, 175), rgb(74, 124, 70), rgb(92, 78, 66), rgb(140, 200, 100)),
+    intArrayOf(rgb(150, 190, 230), rgb(235, 245, 255), rgb(200, 215, 235), rgb(170, 190, 215), rgb(235, 240, 248), rgb(120, 130, 150), rgb(255, 255, 255)),
+    intArrayOf(rgb(240, 170, 90), rgb(255, 230, 170), rgb(225, 170, 120), rgb(200, 140, 90), rgb(225, 190, 110), rgb(170, 120, 70), rgb(245, 215, 140)),
+    intArrayOf(rgb(10, 15, 50), rgb(50, 60, 110), rgb(40, 50, 95), rgb(30, 40, 80), rgb(40, 80, 70), rgb(45, 40, 55), rgb(90, 150, 120)),
+)
+
+private fun rgb(r: Int, g: Int, b: Int) = Color.rgb(r, g, b)
+
+private fun mix(a: Int, b: Int, t: Float): Int = Color.rgb(
+    (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+    (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+    (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt(),
+)
+
 class GameView(context: Context) : View(context) {
     private var world = World()
     private val prefs = context.getSharedPreferences("hills", Context.MODE_PRIVATE)
@@ -29,6 +45,8 @@ class GameView(context: Context) : View(context) {
     private var shownHeightRecord = false
     private var lastMilestone = 0
     private val toasts = ArrayList<Toast>()
+    private var lastBiome = 0
+    private var nightAmount = 0f
     private class Toast(val text: String, val big: Boolean, val until: Long)
     private val cheers = arrayOf("Keep going!", "Nice rolling!", "You're on fire!", "Unstoppable!", "Smooth ride!")
     private var running = false
@@ -70,6 +88,7 @@ class GameView(context: Context) : View(context) {
         startBest = best; startBestHeight = bestHeight
         shownDistRecord = false; shownHeightRecord = false
         lastMilestone = 0
+        lastBiome = 0
         toasts.clear()
         viewMeters = baseMeters
         altSmooth = 0.0
@@ -162,7 +181,28 @@ class GameView(context: Context) : View(context) {
         fun sx(wx: Double) = (w / 2 + (wx - camX) * scale).toFloat()
         fun sy(wy: Double) = (h / 2 - (wy - camY) * scale).toFloat()
 
+        // biome palette, blended over the last 150 m of each biome
+        val bi = Biomes.index(world.x)
+        val inBiome = world.x - floor(world.x / Biomes.LEN) * Biomes.LEN
+        val bt = ((inBiome - (Biomes.LEN - 150.0)) / 150.0).coerceIn(0.0, 1.0).toFloat()
+        val pa = PALETTES[bi]
+        val pb = PALETTES[(bi + 1) % 4]
+        fun pc(i: Int) = mix(pa[i], pb[i], bt)
+        sky.shader = LinearGradient(0f, 0f, 0f, h, pc(0), pc(1), Shader.TileMode.CLAMP)
+        far.color = pc(2); mid.color = pc(3); ground.color = pc(4); rock.color = pc(5); edge.color = pc(6)
+        nightAmount = (if (bi == 3) 1f - bt else 0f) + (if ((bi + 1) % 4 == 3) bt else 0f)
+        if (bi != lastBiome) { lastBiome = bi; toast("Entering: ${Biomes.names[bi]}") }
+
         c.drawRect(0f, 0f, w, h, sky)
+        if (nightAmount > 0.01f) {
+            mark.color = Color.argb((220 * nightAmount).toInt(), 255, 255, 230)
+            for (i in 0 until 50) {
+                val sxp = ((i * 7919) % 1000) / 1000f * w
+                val syp = ((i * 104729) % 1000) / 1000f * h * 0.6f
+                c.drawCircle(sxp, syp, 2f + (i % 3), mark)
+            }
+            mark.color = Color.WHITE
+        }
         ridge(c, far, 0.15, 55.0, 14.0, 0.011, h, w)
         ridge(c, mid, 0.3, 38.0, 9.0, 0.019, h, w)
 

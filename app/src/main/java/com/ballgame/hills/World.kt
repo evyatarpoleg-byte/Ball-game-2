@@ -23,6 +23,14 @@ object Phys {
     const val WEIGHT_REGEN = 0.5   // meter refill per second while the finger is up
 }
 
+/** The world changes every 1000 m: meadow -> snow (slippery) -> desert (sticky) -> night -> ... */
+object Biomes {
+    const val LEN = 1000.0
+    val names = arrayOf("Meadow", "Snow", "Desert", "Night")
+    fun index(x: Double): Int = ((floor(x / LEN).toInt() % 4) + 4) % 4
+    fun friction(i: Int): Double = when (i) { 1 -> 0.2; 2 -> 3.5; else -> 1.0 }
+}
+
 /** Endless hills: key points joined by cosine curves, so slope is 0 at every peak and valley. */
 class Terrain(seed: Long) {
     private val rnd = Random(seed)
@@ -207,7 +215,7 @@ class World(private val seed: Long = System.nanoTime()) {
             }
             val sp = hypot(vx, vy)
             if (sp > 0) {
-                val dec = min(Phys.FRICTION * dt, sp)
+                val dec = min(Phys.FRICTION * Biomes.friction(Biomes.index(x)) * dt, sp)
                 vx -= vx / sp * dec
                 vy -= vy / sp * dec
             }
