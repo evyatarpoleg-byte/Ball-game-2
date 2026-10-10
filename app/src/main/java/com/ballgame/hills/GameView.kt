@@ -152,6 +152,7 @@ class GameView(context: Context) : View(context) {
         if (!world.over) updateRecords()
         for (ev in world.events) {
             if (ev == Ev.PERFECT) toast("PERFECT landing!  x${min(1 + world.combo, 5)} coins")
+            if (ev == Ev.ROCK) toast("Rock! Slowed down - heavy mode hurts less")
         }
         world.events.clear()
 
@@ -246,6 +247,14 @@ class GameView(context: Context) : View(context) {
 
         // milestone flags every 1000 m
         val halfView = w / 2 / scale
+        // rocks
+        for (rock in world.rocksIn(camX - halfView - 3, camX + halfView + 3)) {
+            if (rock.broken) continue
+            ballPaint.color = Color.rgb(110, 110, 120)
+            c.drawCircle(sx(rock.x), sy(rock.y), (rock.r * scale).toFloat(), ballPaint)
+            ballPaint.color = Color.rgb(150, 150, 160)
+            c.drawCircle(sx(rock.x) - (rock.r * scale * 0.25).toFloat(), sy(rock.y) - (rock.r * scale * 0.25).toFloat(), (rock.r * scale * 0.45).toFloat(), ballPaint)
+        }
         // coins
         for (coin in world.coinsIn(camX - halfView - 2, camX + halfView + 2)) {
             if (coin.taken) continue

@@ -85,12 +85,18 @@ class Coin(val x: Double, val y: Double, val value: Int) {
     var taken = false
 }
 
+/** A rock sitting on the ground: hitting it slows the ball (less so when heavy) and breaks it. */
+class Rock(val x: Double, val y: Double, val r: Double) {
+    var broken = false
+}
+
 /** Things the UI should react to (sounds, haptics, toasts). */
 object Ev {
     const val COIN = 1
     const val PERFECT = 2
     const val HARD = 3
     const val SOFT = 4
+    const val ROCK = 5
 }
 
 class World(private val seed: Long = System.nanoTime()) {
@@ -101,6 +107,29 @@ class World(private val seed: Long = System.nanoTime()) {
     private var airTime = 0.0
     private val chunks = HashMap<Int, ArrayList<Coin>>()
     private val chunkSize = 50.0
+    private val rockChunks = HashMap<Int, ArrayList<Rock>>()
+
+    private fun rockChunk(ci: Int): ArrayList<Rock> = rockChunks.getOrPut(ci) {
+        val list = ArrayList<Rock>()
+        if (ci >= 4) {
+            val r = Random(seed xor (ci * 104729L))
+            if (r.nextDouble() < 0.5) {
+                val rx = ci * chunkSize + 5 + r.nextDouble() * 40
+                if (kotlin.math.abs(terrain.slope(rx)) < 0.35) {
+                    val rr = 1.0 + r.nextDouble() * 0.6
+                    list += Rock(rx, terrain.height(rx) + rr * 0.5, rr)
+                }
+            }
+        }
+        rockChunks.remove(ci - 6)
+        list
+    }
+
+    fun rocksIn(xa: Double, xb: Double): List<Rock> {
+        val out = ArrayList<Rock>()
+        for (ci in floor(xa / chunkSize).toInt()..floor(xb / chunkSize).toInt()) out += rockChunk(ci)
+        return out
+    }
 
     /** Coins above hills: arcs reward airtime, rare stars reward really high jumps. */
     private fun chunk(ci: Int): ArrayList<Coin> = chunks.getOrPut(ci) {
@@ -232,6 +261,17 @@ class World(private val seed: Long = System.nanoTime()) {
                 coin.taken = true
                 coinsCollected += coin.value * min(1 + combo, 5)
                 events += Ev.COIN
+            }
+        }
+
+        for (rock in rocksIn(x - 4.0, x + 4.0)) {
+            if (!rock.broken && hypot(rock.x - x, rock.y - y) < Phys.RADIUS + rock.r) {
+                rock.broken = true
+                val f = if (heavy) 0.75 else 0.45
+                vx *= f
+                vy *= f
+                combo = 0
+                events += Ev.ROCK
             }
         }
 
