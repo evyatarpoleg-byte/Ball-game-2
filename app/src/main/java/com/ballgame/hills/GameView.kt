@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.cos
@@ -60,6 +61,8 @@ class GameView(context: Context) : View(context) {
     private var viewMeters = baseMeters
     private var altSmooth = 0.0
     private var restartRect = RectF()
+    private var soundRect = RectF()
+    private val sfx = Sfx().apply { enabled = prefs.getBoolean("sound", true) }
     private val sky = Paint()
     private val far = Paint().apply { color = Color.rgb(150, 170, 205); isAntiAlias = true }
     private val mid = Paint().apply { color = Color.rgb(110, 135, 175); isAntiAlias = true }
@@ -74,6 +77,11 @@ class GameView(context: Context) : View(context) {
     private val path = Path()
 
     fun resumeLoop() { running = true; lastNanos = 0L; postInvalidateOnAnimation() }
+    override fun onDetachedFromWindow() {
+        sfx.release()
+        super.onDetachedFromWindow()
+    }
+
     fun pauseLoop() { running = false; saveRecords() }
 
     private fun saveRecords() {
@@ -94,7 +102,8 @@ class GameView(context: Context) : View(context) {
         altSmooth = 0.0
     }
 
-    private fun toast(text: String, big: Boolean = false) {
+    private fun toast(text: String, big: Boolean = false, fanfare: Boolean = false) {
+        if (fanfare) sfx.play(Sfx.FANFARE)
         toasts.add(Toast(text, big, System.currentTimeMillis() + if (big) 5000 else 3000))
         if (toasts.size > 3) toasts.removeAt(0)
     }
@@ -103,19 +112,19 @@ class GameView(context: Context) : View(context) {
         val d = world.distance.toInt()
         if (d > best) {
             best = d
-            if (startBest > 0 && !shownDistRecord) { shownDistRecord = true; toast("New distance record!") }
+            if (startBest > 0 && !shownDistRecord) { shownDistRecord = true; toast("New distance record!", fanfare = true) }
         }
         if (!world.grounded) {
             val hgt = (world.y - Phys.RADIUS - world.terrain.height(world.x)).toInt()
             if (hgt > bestHeight) {
                 bestHeight = hgt
-                if (startBestHeight > 0 && !shownHeightRecord) { shownHeightRecord = true; toast("New height record!") }
+                if (startBestHeight > 0 && !shownHeightRecord) { shownHeightRecord = true; toast("New height record!", fanfare = true) }
             }
         }
         while (d >= (lastMilestone + 1) * 1000) {
             lastMilestone++
-            if (lastMilestone % 10 == 0) toast("CONGRATULATIONS! ${lastMilestone} km!", big = true)
-            else toast("${lastMilestone * 1000} m - ${cheers[lastMilestone % cheers.size]}")
+            if (lastMilestone % 10 == 0) toast("CONGRATULATIONS! ${lastMilestone} km!", big = true, fanfare = true)
+            else toast("${lastMilestone * 1000} m - ${cheers[lastMilestone % cheers.size]}", fanfare = true)
         }
     }
 
@@ -129,6 +138,12 @@ class GameView(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 if (restartRect.contains(e.x, e.y)) {
                     newRun()
+                    return true
+                }
+                if (soundRect.contains(e.x, e.y)) {
+                    sfx.enabled = !sfx.enabled
+                    prefs.edit().putBoolean("sound", sfx.enabled).apply()
+                    toast(if (sfx.enabled) "Sound on" else "Sound off")
                     return true
                 }
                 if (world.over && System.currentTimeMillis() - overAt > 600) newRun()
@@ -151,8 +166,24 @@ class GameView(context: Context) : View(context) {
         }
         if (!world.over) updateRecords()
         for (ev in world.events) {
-            if (ev == Ev.PERFECT) toast("PERFECT landing!  x${min(1 + world.combo, 5)} coins")
-            if (ev == Ev.ROCK) toast("Rock! Slowed down - heavy mode hurts less")
+            when (ev) {
+                Ev.COIN -> sfx.play(Sfx.COIN)
+                Ev.PERFECT -> {
+                    toast("PERFECT landing!  x${min(1 + world.combo, 5)} coins")
+                    sfx.play(Sfx.PERFECT)
+                    performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                }
+                Ev.SOFT -> sfx.play(Sfx.SOFT)
+                Ev.HARD -> {
+                    sfx.play(Sfx.HARD)
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                }
+                Ev.ROCK -> {
+                    toast("Rock! Slowed down - heavy mode hurts less")
+                    sfx.play(Sfx.ROCK)
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                }
+            }
         }
         world.events.clear()
 
@@ -317,6 +348,14 @@ class GameView(context: Context) : View(context) {
         text.textAlign = Paint.Align.CENTER
         text.textSize = bs * 0.7f
         c.drawText("\u21BB", restartRect.centerX(), restartRect.centerY() + bs * 0.25f, text)
+        soundRect.set(restartRect.left - bs - 12f, 16f, restartRect.left - 12f, 16f + bs)
+        ballPaint.color = Color.argb(150, 0, 0, 0)
+        c.drawRoundRect(soundRect, bs / 4, bs / 4, ballPaint)
+        c.drawText("\u266A", soundRect.centerX(), soundRect.centerY() + bs * 0.25f, text)
+        if (!sfx.enabled) {
+            mark.strokeWidth = 6f
+            c.drawLine(soundRect.left + bs * 0.2f, soundRect.bottom - bs * 0.2f, soundRect.right - bs * 0.2f, soundRect.top + bs * 0.2f, mark)
+        }
 
         // HUD
         text.textAlign = Paint.Align.LEFT
