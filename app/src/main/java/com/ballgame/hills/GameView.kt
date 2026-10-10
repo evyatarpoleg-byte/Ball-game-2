@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Shader
 import android.view.MotionEvent
 import android.view.View
@@ -24,7 +25,9 @@ class GameView(context: Context) : View(context) {
     private var camInit = false
     private var overAt = 0L
 
-    private val viewMeters = 36.0   // visible height in metres
+    private val baseMeters = 36.0   // visible height in metres at ground level
+    private var viewMeters = baseMeters
+    private var restartRect = RectF()
     private val sky = Paint()
     private val far = Paint().apply { color = Color.rgb(150, 170, 205); isAntiAlias = true }
     private val mid = Paint().apply { color = Color.rgb(110, 135, 175); isAntiAlias = true }
@@ -49,6 +52,10 @@ class GameView(context: Context) : View(context) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (restartRect.contains(e.x, e.y)) {
+                    world = World(); camInit = false
+                    return true
+                }
                 if (world.over && System.currentTimeMillis() - overAt > 600) {
                     world = World(); camInit = false
                 }
@@ -73,6 +80,9 @@ class GameView(context: Context) : View(context) {
 
         val w = width.toFloat()
         val h = height.toFloat()
+        val alt = (world.y - world.terrain.height(world.x) - 4.0).coerceAtLeast(0.0)
+        val wantMeters = (baseMeters + alt * 1.6).coerceAtMost(baseMeters * 2.5)
+        viewMeters += (wantMeters - viewMeters) * (1 - Math.exp(-3.0 * dt))
         val scale = (h / viewMeters).toFloat()
         val halfW = w / scale / 2.0
         val tx = world.x + halfW * 0.35
@@ -140,6 +150,15 @@ class GameView(context: Context) : View(context) {
         c.drawCircle(bx, by, r * if (heavy) 1.15f else 1f, ballPaint)
         val a = world.angle
         c.drawLine(bx, by, bx + (cos(a) * r * 0.85).toFloat(), by + (sin(a) * r * 0.85).toFloat(), mark)
+
+        // restart button
+        val bs = h / 9f
+        restartRect.set(w - bs - 16f, 16f, w - 16f, 16f + bs)
+        ballPaint.color = Color.argb(150, 0, 0, 0)
+        c.drawRoundRect(restartRect, bs / 4, bs / 4, ballPaint)
+        text.textAlign = Paint.Align.CENTER
+        text.textSize = bs * 0.7f
+        c.drawText("\u21BB", restartRect.centerX(), restartRect.centerY() + bs * 0.25f, text)
 
         // HUD
         text.textAlign = Paint.Align.LEFT
