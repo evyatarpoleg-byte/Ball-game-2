@@ -1,0 +1,39 @@
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Build
+        run: gradle --no-daemon assembleRelease
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk HillRoller.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HillRoller-apk
+          path: HillRoller.apk
+      # Rolling pre-release so the APK can be downloaded from the GitHub mobile site/app.
+      - name: Publish "latest" release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest HillRoller.apk --prerelease --target "$GITHUB_SHA" \
+            --title "Latest build" --notes "Auto-built from $GITHUB_SHA on $GITHUB_REF_NAME"
