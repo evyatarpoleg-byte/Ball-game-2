@@ -60,7 +60,7 @@ class GameView(context: Context) : View(context) {
     private val toasts = ArrayList<Toast>()
     private var lastBiome = 0
     private var nightAmount = 0f
-    private class Toast(val text: String, val big: Boolean, val until: Long)
+    private class Toast(val text: String, val big: Boolean, val until: Long, val color: Int)
     private val cheers = arrayOf("Keep going!", "Nice rolling!", "You're on fire!", "Unstoppable!", "Smooth ride!")
     private var running = false
     private var lastNanos = 0L
@@ -141,9 +141,9 @@ class GameView(context: Context) : View(context) {
         altSmooth = 0.0
     }
 
-    private fun toast(text: String, big: Boolean = false, fanfare: Boolean = false) {
+    private fun toast(text: String, big: Boolean = false, fanfare: Boolean = false, color: Int = Color.WHITE) {
         if (fanfare) sfx.play(Sfx.FANFARE)
-        toasts.add(Toast(text, big, System.currentTimeMillis() + if (big) 5000 else 3000))
+        toasts.add(Toast(text, big, System.currentTimeMillis() + if (big) 5000 else 3000, color))
         if (toasts.size > 3) toasts.removeAt(0)
     }
 
@@ -226,14 +226,22 @@ class GameView(context: Context) : View(context) {
                     sfx.play(Sfx.HARD)
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 }
-                Ev.ROCK -> {
-                    toast("Rock! Slowed down - heavy mode hurts less")
+                Ev.BOULDER -> {
+                    toast("BOULDER! You lost most of your speed", color = Color.rgb(255, 120, 100))
                     sfx.play(Sfx.ROCK)
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 }
             }
         }
         world.events.clear()
+        if (!world.over) {
+            for (b in world.bouldersIn(world.x, world.x + 170.0)) {
+                if (!b.warned && !b.broken && b.x - world.x < 160.0) {
+                    b.warned = true
+                    toast("BOULDER AHEAD in the valley! Fly over it!", color = Color.rgb(255, 90, 70))
+                }
+            }
+        }
 
         val w = width.toFloat()
         val h = height.toFloat()
@@ -326,13 +334,30 @@ class GameView(context: Context) : View(context) {
 
         // milestone flags every 1000 m
         val halfView = w / 2 / scale
-        // rocks
-        for (rock in world.rocksIn(camX - halfView - 3, camX + halfView + 3)) {
-            if (rock.broken) continue
-            ballPaint.color = Color.rgb(110, 110, 120)
-            c.drawCircle(sx(rock.x), sy(rock.y), (rock.r * scale).toFloat(), ballPaint)
-            ballPaint.color = Color.rgb(150, 150, 160)
-            c.drawCircle(sx(rock.x) - (rock.r * scale * 0.25).toFloat(), sy(rock.y) - (rock.r * scale * 0.25).toFloat(), (rock.r * scale * 0.45).toFloat(), ballPaint)
+        // boulders
+        for (b in world.bouldersIn(camX - halfView - 6, camX + halfView + 6)) {
+            if (b.broken) continue
+            val bxp = sx(b.x)
+            val byp = sy(b.y)
+            val br = (b.r * scale).toFloat()
+            ballPaint.color = Color.rgb(85, 80, 88)
+            c.drawCircle(bxp, byp, br, ballPaint)
+            ballPaint.color = Color.rgb(120, 115, 125)
+            c.drawCircle(bxp - br * 0.25f, byp - br * 0.25f, br * 0.6f, ballPaint)
+            ballPaint.color = Color.rgb(150, 145, 155)
+            c.drawCircle(bxp - br * 0.35f, byp - br * 0.4f, br * 0.25f, ballPaint)
+            // warning sign above it
+            val sy0 = byp - br - scale * 3.2f
+            path.reset()
+            path.moveTo(bxp, sy0)
+            path.lineTo(bxp - scale * 1.4f, sy0 + scale * 2.4f)
+            path.lineTo(bxp + scale * 1.4f, sy0 + scale * 2.4f)
+            path.close()
+            ballPaint.color = Color.rgb(230, 50, 40)
+            c.drawPath(path, ballPaint)
+            text.textAlign = Paint.Align.CENTER
+            text.textSize = scale * 1.8f
+            c.drawText("!", bxp, sy0 + scale * 2.2f, text)
         }
         // coins
         for (coin in world.coinsIn(camX - halfView - 2, camX + halfView + 2)) {
@@ -423,14 +448,14 @@ class GameView(context: Context) : View(context) {
         var ty0 = h * 0.3f
         for (t in toasts) {
             text.textSize = if (t.big) h / 9f else h / 14f
-            text.color = if (t.big) Color.rgb(255, 215, 60) else Color.WHITE
+            text.color = if (t.big) Color.rgb(255, 215, 60) else t.color
             c.drawText(t.text, w / 2, ty0, text)
             ty0 += text.textSize * 1.2f
         }
         text.color = Color.WHITE
         text.textSize = h / 24f
         if (!world.launched && !world.holding) {
-            c.drawText("Hold to push the ball off the hill", w / 2, h * 0.2f, text)
+            c.drawText("Hold to push the ball (or just let it roll)", w / 2, h * 0.2f, text)
         } else if (world.launched && world.distance < 60) {
             c.drawText("Hold on downhills = heavier ball = more speed", w / 2, h * 0.2f, text)
         }

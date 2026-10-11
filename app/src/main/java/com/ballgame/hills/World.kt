@@ -28,20 +28,40 @@ object Biomes {
     const val LEN = 1000.0
     val names = arrayOf("Meadow", "Snow", "Desert", "Night")
     fun index(x: Double): Int = ((floor(x / LEN).toInt() % 4) + 4) % 4
-    fun friction(i: Int): Double = when (i) { 1 -> 0.2; 2 -> 3.5; else -> 1.0 }
+    fun friction(i: Int): Double = when (i) { 1 -> 0.2; 2 -> 4.5; else -> 1.0 }
 }
 
-/** Endless hills: key points joined by cosine curves, so slope is 0 at every peak and valley. */
+/** How the hills look in one biome. [k] blends in pointed peaks (valleys always stay smooth). */
+private class Shape(
+    val wLo: Double, val wHi: Double,
+    val riseLo: Double, val riseHi: Double,
+    val fallLo: Double, val fallHi: Double,
+    val k: Double, val cap: Double,
+)
+
+private val SHAPES = arrayOf(
+    Shape(18.0, 28.0, 5.0, 9.0, 8.0, 14.0, 0.0, 40.0),   // Meadow: round, medium hills
+    Shape(16.0, 24.0, 6.0, 10.0, 10.0, 15.0, 0.3, 60.0), // Snow: taller, steeper, pointier
+    Shape(26.0, 40.0, 6.0, 10.0, 7.0, 11.0, 0.0, 25.0),  // Desert: long, low dunes
+    Shape(15.0, 22.0, 5.0, 9.0, 8.0, 13.0, 0.4, 50.0),   // Night: narrow spiky peaks
+)
+
+/**
+ * Endless hills: key points joined by smooth curves. Valleys are always smooth (slope 0);
+ * with a pointed biome the peaks get sharper, which throws the ball off them.
+ */
 class Terrain(seed: Long) {
     private val rnd = Random(seed)
     private val xs = ArrayList<Double>()
     private val ys = ArrayList<Double>()
+    private val ks = ArrayList<Double>()
     private var nextIsPeak = false
 
     init {
-        xs += -40.0; ys += 14.0
-        xs += 0.0; ys += 14.0
-        xs += 10.0; ys += 14.0
+        // Flat start, then a gentle downhill so the ball always gets going.
+        xs += -40.0; ys += 14.0; ks += 0.0
+        xs += 0.0; ys += 14.0; ks += 0.0
+        xs += 8.0; ys += 12.0; ks += 0.0
     }
 
     private fun uniform(a: Double, b: Double) = a + rnd.nextDouble() * (b - a)
@@ -50,15 +70,17 @@ class Terrain(seed: Long) {
         while (xs.last() < toX) {
             val px = xs.last()
             val py = ys.last()
+            val sh = SHAPES[Biomes.index(px)]
             val d = px / 400.0
-            val w = uniform(18.0, 28.0) + min(d * 6.0, 14.0)
-            var ny = if (nextIsPeak) py + uniform(5.0, 9.0) + min(d * 3.0, 6.0)
-            else py - uniform(8.0, 14.0) - min(d * 3.0, 6.0)
-            if (ny > 40.0) ny = 40.0 - uniform(0.0, 3.0)
+            val w = uniform(sh.wLo, sh.wHi) + min(d * 6.0, 14.0)
+            var ny = if (nextIsPeak) py + uniform(sh.riseLo, sh.riseHi) + min(d * 3.0, 6.0)
+            else py - uniform(sh.fallLo, sh.fallHi) - min(d * 3.0, 6.0)
+            if (ny > sh.cap) ny = sh.cap - uniform(0.0, 3.0)
             if (ny < 0.0) ny = uniform(0.0, 2.0)
             nextIsPeak = !nextIsPeak
             xs += px + w
             ys += ny
+            ks += sh.k
         }
     }
 
@@ -71,7 +93,10 @@ class Terrain(seed: Long) {
             if (xs[m] <= x) lo = m else hi = m
         }
         val t = ((x - xs[lo]) / (xs[hi] - xs[lo])).coerceIn(0.0, 1.0)
-        val c = (1 - cos(PI * t)) / 2
+        val k = ks[hi]
+        val smooth = (1 - cos(PI * t)) / 2
+        val c = if (k == 0.0) smooth
+        else (1 - k) * smooth + k * (if (ys[hi] > ys[lo]) t * t else 1 - (1 - t) * (1 - t))
         return ys[lo] + (ys[hi] - ys[lo]) * c
     }
 
@@ -79,15 +104,42 @@ class Terrain(seed: Long) {
         val e = 0.05
         return (height(x + e) - height(x - e)) / (2 * e)
     }
+
+    /** First crest (slope turns from up to down) in [xa, xb], or null. */
+    fun peakIn(xa: Double, xb: Double): Double? {
+        var prev = slope(xa)
+        var x = xa + 0.5
+        while (x <= xb) {
+            val s = slope(x)
+            if (prev > 0 && s <= 0) return x
+            prev = s
+            x += 0.5
+        }
+        return null
+    }
+
+    /** First valley bottom (slope turns from down to up) in [xa, xb], or null. */
+    fun valleyIn(xa: Double, xb: Double): Double? {
+        var prev = slope(xa)
+        var x = xa + 0.5
+        while (x <= xb) {
+            val s = slope(x)
+            if (prev < 0 && s >= 0) return x
+            prev = s
+            x += 0.5
+        }
+        return null
+    }
 }
 
 class Coin(val x: Double, val y: Double, val value: Int) {
     var taken = false
 }
 
-/** A rock sitting on the ground: hitting it slows the ball (less so when heavy) and breaks it. */
-class Rock(val x: Double, val y: Double, val r: Double) {
+/** A big boulder in a valley bottom. Hitting it costs most of your speed; fly over it instead. */
+class Boulder(val x: Double, val y: Double, val r: Double) {
     var broken = false
+    var warned = false
 }
 
 /** Things the UI should react to (sounds, haptics, toasts). */
@@ -96,7 +148,7 @@ object Ev {
     const val PERFECT = 2
     const val HARD = 3
     const val SOFT = 4
-    const val ROCK = 5
+    const val BOULDER = 5
 }
 
 class World(private val seed: Long = System.nanoTime()) {
@@ -107,58 +159,103 @@ class World(private val seed: Long = System.nanoTime()) {
     private var airTime = 0.0
     private val chunks = HashMap<Int, ArrayList<Coin>>()
     private val chunkSize = 50.0
-    private val rockChunks = HashMap<Int, ArrayList<Rock>>()
+    private val boulderChunks = HashMap<Int, ArrayList<Boulder>>()
 
-    private fun rockChunk(ci: Int): ArrayList<Rock> = rockChunks.getOrPut(ci) {
-        val list = ArrayList<Rock>()
-        if (ci >= 4) {
+    /** Rare, big boulders in valley bottoms (after 300 m). */
+    private fun boulderChunk(ci: Int): ArrayList<Boulder> = boulderChunks.getOrPut(ci) {
+        val list = ArrayList<Boulder>()
+        if (ci >= 6) {
             val r = Random(seed xor (ci * 104729L))
-            if (r.nextDouble() < 0.5) {
-                val rx = ci * chunkSize + 5 + r.nextDouble() * 40
-                if (kotlin.math.abs(terrain.slope(rx)) < 0.35) {
-                    val rr = 1.0 + r.nextDouble() * 0.6
-                    list += Rock(rx, terrain.height(rx) + rr * 0.5, rr)
+            if (r.nextDouble() < 0.09) {
+                val bx = terrain.valleyIn(ci * chunkSize, (ci + 1) * chunkSize)
+                if (bx != null) {
+                    val rr = 2.2 + r.nextDouble() * 1.0
+                    list += Boulder(bx, terrain.height(bx) + rr * 0.6, rr)
                 }
             }
         }
-        rockChunks.remove(ci - 6)
+        boulderChunks.remove(ci - 8)
         list
     }
 
-    fun rocksIn(xa: Double, xb: Double): List<Rock> {
-        val out = ArrayList<Rock>()
-        for (ci in floor(xa / chunkSize).toInt()..floor(xb / chunkSize).toInt()) out += rockChunk(ci)
+    fun bouldersIn(xa: Double, xb: Double): List<Boulder> {
+        val out = ArrayList<Boulder>()
+        for (ci in floor(xa / chunkSize).toInt()..floor(xb / chunkSize).toInt()) out += boulderChunk(ci)
         return out
     }
 
-    /** Coins above hills: arcs reward airtime, rare stars reward really high jumps. */
+    /** Coins that trace paths the ball could really take: along the ground or through the air. */
     private fun chunk(ci: Int): ArrayList<Coin> = chunks.getOrPut(ci) {
         val list = ArrayList<Coin>()
-        if (ci >= 3) {
+        if (ci >= 2) {
             val r = Random(seed xor (ci * 7919L))
             val x0 = ci * chunkSize
-            if (r.nextDouble() < 0.55) {
-                val cx = x0 + 8 + r.nextDouble() * 30
-                val lift = 5 + r.nextDouble() * 17
-                var base = 0.0
-                for (i in 0 until 5) base = max(base, terrain.height(cx + i * 3.5))
-                for (i in 0 until 5) {
-                    val bump = 2.5 * kotlin.math.sin(PI * i / 4.0)
-                    list += Coin(cx + i * 3.5, base + lift + bump, 1)
-                }
-            }
-            if (r.nextDouble() < 0.18) {
-                val sx = x0 + 5 + r.nextDouble() * 40
-                list += Coin(sx, terrain.height(sx) + 35 + r.nextDouble() * 25, 5)
+            val roll = r.nextDouble()
+            when {
+                roll < 0.35 -> groundTrail(list, x0, r)
+                roll < 0.70 -> flightArc(list, x0, r, high = false)
+                roll < 0.82 -> flightArc(list, x0, r, high = true)
             }
         }
-        chunks.remove((ci - 6))
+        chunks.remove(ci - 8)
         list
+    }
+
+    /** A row of coins right on the surface of a downhill or an uphill, where the ball rolls. */
+    private fun groundTrail(list: ArrayList<Coin>, x0: Double, r: Random) {
+        val wantDown = r.nextBoolean()
+        var sx = x0 + 3 + r.nextDouble() * 10
+        var cx = x0 + 3.0
+        while (cx < x0 + 45.0) {
+            val m = terrain.slope(cx)
+            if (kotlin.math.abs(m) > 0.12 && (m < 0) == wantDown) { sx = cx; break }
+            cx += 2.0
+        }
+        for (i in 0 until 7) {
+            val px = sx + i * 3.0
+            val m = terrain.slope(px)
+            val inv = 1.0 / sqrt(1 + m * m)
+            list += Coin(px - m * inv * Phys.RADIUS, terrain.height(px) + inv * Phys.RADIUS, 1)
+        }
+    }
+
+    /**
+     * Coins along the path of a ball leaving the next crest: a flat flight, or (high = true)
+     * a big jump with a star at its highest point.
+     */
+    private fun flightArc(list: ArrayList<Coin>, x0: Double, r: Random, high: Boolean) {
+        val xp = terrain.peakIn(x0, x0 + chunkSize) ?: return
+        var px = xp
+        var py = terrain.height(xp) + Phys.RADIUS
+        val vh = 18.0 + r.nextDouble() * 14.0
+        var vy = if (high) 18.0 + r.nextDouble() * 12.0 else 0.0
+        val dt = 0.04
+        var acc = 0.0
+        var t = 0.0
+        var apex = !high
+        while (t < 8.0 && list.size < 22) {
+            val prevVy = vy
+            vy -= Phys.G * dt
+            px += vh * dt
+            py += vy * dt
+            t += dt
+            if (py - Phys.RADIUS < terrain.height(px)) break
+            acc += hypot(vh, vy) * dt
+            if (!apex && prevVy > 0 && vy <= 0) {
+                apex = true
+                list += Coin(px, py, 5)
+                acc = 0.0
+            } else if (acc >= 4.0) {
+                acc = 0.0
+                list += Coin(px, py, 1)
+            }
+        }
     }
 
     fun coinsIn(xa: Double, xb: Double): List<Coin> {
         val out = ArrayList<Coin>()
-        for (ci in floor(xa / chunkSize).toInt()..floor(xb / chunkSize).toInt()) out += chunk(ci)
+        // arcs can reach ~100 m past the chunk that owns them
+        for (ci in floor(xa / chunkSize).toInt() - 2..floor(xb / chunkSize).toInt()) out += chunk(ci)
         return out
     }
 
@@ -169,6 +266,7 @@ class World(private val seed: Long = System.nanoTime()) {
     var angle = 0.0
     var grounded = true
     var launched = false
+    private var everHeld = false
     var holding = false
     var over = false
     var time = 0.0
@@ -212,8 +310,10 @@ class World(private val seed: Long = System.nanoTime()) {
 
     private fun step(dt: Double) {
         time += dt
-        if (!holding && time > 0.3) launched = true
-        if (holding && !launched && x > 8.0) launched = true
+        // The opening push lasts until the first release (or until the ball has rolled off the start).
+        if (holding) everHeld = true
+        if (everHeld && !holding) launched = true
+        if (x > 8.0) launched = true
 
         val g = if (heavy) Phys.G * Phys.HEAVY else Phys.G
         if (heavy) weight = max(0.0, weight - dt / Phys.WEIGHT_SECONDS)
@@ -264,14 +364,14 @@ class World(private val seed: Long = System.nanoTime()) {
             }
         }
 
-        for (rock in rocksIn(x - 4.0, x + 4.0)) {
-            if (!rock.broken && hypot(rock.x - x, rock.y - y) < Phys.RADIUS + rock.r) {
-                rock.broken = true
-                val f = if (heavy) 0.75 else 0.45
+        for (b in bouldersIn(x - 6.0, x + 6.0)) {
+            if (!b.broken && hypot(b.x - x, b.y - y) < Phys.RADIUS + b.r) {
+                b.broken = true
+                val f = if (heavy) 0.55 else 0.25
                 vx *= f
                 vy *= f
                 combo = 0
-                events += Ev.ROCK
+                events += Ev.BOULDER
             }
         }
 
