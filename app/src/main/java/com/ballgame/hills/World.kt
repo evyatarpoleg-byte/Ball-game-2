@@ -151,8 +151,28 @@ object Ev {
     const val BOULDER = 5
 }
 
-class World(private val seed: Long = System.nanoTime()) {
+/** Race length for the versus modes, in metres. */
+const val RACE_LENGTH = 5000.0
+
+object Loss {
+    const val BACK = 1   // rolled backwards
+    const val STUCK = 2  // stopped moving
+}
+
+/**
+ * One ball in one world. Two Worlds built with the same seed have identical hills, boulders and
+ * coins, so versus modes just run one World per ball. [race] switches on the finish line and the
+ * "rolling backwards loses" rule and removes the coins.
+ */
+class World(private val seed: Long = System.nanoTime(), val race: Boolean = false) {
     val terrain = Terrain(seed)
+    var boulderAvoid = 0.0   // bots: chance to fly over/dodge a boulder instead of hitting it
+    var assist = 0.0         // bots: forward push (m/s^2) when stalled on an uphill
+    private val rng = Random(seed + 17)
+    var finished = false
+    var lossReason = 0
+    private var maxX = 3.0
+    val finishX = 3.0 + RACE_LENGTH
     val events = ArrayList<Int>()
     var coinsCollected = 0
     var combo = 0          // consecutive perfect landings
@@ -187,7 +207,7 @@ class World(private val seed: Long = System.nanoTime()) {
     /** Coins that trace paths the ball could really take: along the ground or through the air. */
     private fun chunk(ci: Int): ArrayList<Coin> = chunks.getOrPut(ci) {
         val list = ArrayList<Coin>()
-        if (ci >= 2) {
+        if (ci >= 2 && !race) {
             val r = Random(seed xor (ci * 7919L))
             val x0 = ci * chunkSize
             val roll = r.nextDouble()
@@ -319,6 +339,7 @@ class World(private val seed: Long = System.nanoTime()) {
         if (heavy) weight = max(0.0, weight - dt / Phys.WEIGHT_SECONDS)
         else if (!holding) weight = min(1.0, weight + dt * Phys.WEIGHT_REGEN)
         if (holding && !launched) vx += Phys.START_PUSH * dt
+        if (assist > 0.0 && launched && speed < 5.0 && terrain.slope(x) > 0.02) vx += assist * dt
         vy -= g * dt
         val k = exp(-Phys.DRAG * dt)
         vx *= k
@@ -367,6 +388,7 @@ class World(private val seed: Long = System.nanoTime()) {
         for (b in bouldersIn(x - 6.0, x + 6.0)) {
             if (!b.broken && hypot(b.x - x, b.y - y) < Phys.RADIUS + b.r) {
                 b.broken = true
+                if (rng.nextDouble() < boulderAvoid) continue
                 val f = if (heavy) 0.55 else 0.25
                 vx *= f
                 vy *= f
@@ -376,6 +398,11 @@ class World(private val seed: Long = System.nanoTime()) {
         }
 
         stillTime = if (launched && speed < 0.4) stillTime + dt else 0.0
-        if (stillTime > 2.0 || x < -5.0) over = true
+        if (race) {
+            maxX = max(maxX, x)
+            if (x >= finishX) { finished = true; over = true }
+            else if (x < maxX - 6.0) { lossReason = Loss.BACK; over = true }
+            else if (stillTime > 2.0) { lossReason = Loss.STUCK; over = true }
+        } else if (stillTime > 2.0 || x < -5.0) over = true
     }
 }

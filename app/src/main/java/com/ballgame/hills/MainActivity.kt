@@ -19,6 +19,11 @@ class MainActivity : Activity() {
         view.resumeLoop()
     }
 
+    @Deprecated("Back is handled by the game's own menus")
+    override fun onBackPressed() {
+        if (!view.onBack()) super.onBackPressed()
+    }
+
     override fun onPause() {
         super.onPause()
         view.pauseLoop()

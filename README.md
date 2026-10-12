@@ -10,3 +10,8 @@
 Every push runs `.github/workflows/build.yml`, which builds the APK and publishes it to the
 **Releases → "Latest build"** page. Open that page on your phone, download `HillRoller.apk`, and install it
 (allow "install unknown apps" for your browser when asked).
+
+## Modes
+- **Standard** - roll as far as you can, collect coins, beat your records.
+- **You vs Bot** (Easy / Medium / Hard) - race a computer ball to 5000 m on the same hills. Rolling backwards or getting stuck loses.
+- **You vs Friend** - split screen. Left half controls player 1 (blue ball), right half player 2 (red ball). Same rules.
