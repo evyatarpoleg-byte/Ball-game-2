@@ -9,7 +9,8 @@ import kotlin.math.sqrt
 /**
  * Plays a [World] like a person would: it only ever presses or releases "hold".
  * level 0 = easy, 1 = medium, 2 = hard. Harder bots react faster, make fewer mistakes,
- * look ahead to pick a good landing, dodge boulders more often and recover better from stalls.
+ * look ahead to pick a good landing and dodge boulders more often. All bots get a stall assist
+ * (a push when stuck on an uphill), stronger for the easier bots so they do not die in the first few hills.
  */
 class Bot(private val world: World, val level: Int, seed: Long) {
     private val rnd = Random(seed xor 0x5DEECE66DL)
